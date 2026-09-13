@@ -6,16 +6,13 @@ This repo documents the architecture and decisions. The working control repo, ho
 
 ## Overview
 
-The lab consists of a Puppet master managing both Linux and Windows agent nodes over a hardened, VPN-gated network, with a full GitOps deployment pipeline and monitoring stack.
+The lab consists of a Puppet master managing both Linux and Windows agent nodes over a hardened, VPN-gated network, with a Git-based change workflow and a monitoring stack.
 
 ```
-Git Repo (dev/production branches)
+Git Repo (dev branch -> PR -> production)
   |
-  v
-GitHub Actions (lint -> validate -> deploy)
-  |
-  v (joins as ephemeral WireGuard peer)
-Puppet Master (r10k + puppetserver, hiera-eyaml)
+  v (merge to production)
+Puppet Master (r10k_cron: scheduled r10k deploy, puppetserver, hiera-eyaml)
   |
   v (WireGuard tunnel)
 Agent Nodes (Linux + Windows)
@@ -26,10 +23,10 @@ Zabbix Monitoring (LLD, custom checks, dashboards)
 
 ## What it does
 
-* **GitOps workflow** - changes are made on a `dev` branch, reviewed via PR, and merged to `production`. Merges to `production` trigger an automated deploy.
-* **CI/CD** - GitHub Actions lints and validates Puppet code on every PR. On merge, the deploy job joins the lab's WireGuard mesh as a short-lived, scoped peer, deploys via r10k, and then leaves the mesh - no standing credentials or always-on access from CI to the lab.
+* **GitOps workflow** - changes are made on the `dev` branch, reviewed via PR, and merged to `production`. There's no separate feature-branch-per-change step - everything lands on `dev` first, then goes through PR review before `production`.
+* **Scheduled deployment** - the Puppet master runs a cron-driven r10k deploy (`r10k_cron`) that periodically pulls the `production` branch and updates the deployed environment. There's no CI/CD runner reaching into the lab network to push changes - the master pulls on its own schedule, keeping the deployment surface entirely inside the WireGuard-gated network.
 * **Secrets management** - all sensitive data (keys, credentials) is encrypted at rest using hiera-eyaml. Nothing sensitive is ever committed in plaintext.
-* **Cross-platform node management** - the same control repo manages both Linux hosts and a Windows Server node, with OS-conditional manifests handling platform-specific tooling (Chocolatey vs native packages, PowerShell vs Bash exec providers) while sharing the same GitOps and secrets workflow.
+* **Cross-platform node management** - the same control repo manages both Linux hosts and a Windows Server node, with OS-conditional manifests handling platform-specific tooling (Chocolatey vs native packages, PowerShell vs Bash exec providers) while sharing the same Git workflow and secrets store.
 * **Zero-trust network access** - SSH, the Puppet master's management interface, and Windows remote management (WinRM) are reachable only through a WireGuard VPN tunnel; there is no direct public exposure of administrative services. WinRM firewall rules are Puppet-managed and explicitly scoped to the VPN subnet, not left on default "any source" rules.
 * **Observability** - a Zabbix stack monitors the environment, including:
   * Low-Level Discovery (LLD) for automatic container inventory/monitoring
@@ -54,4 +51,4 @@ Want to see it live? I'm happy to do a screen-share walkthrough, or issue a time
 
 ## Stack
 
-Puppet - r10k - hiera-eyaml - GitHub Actions - WireGuard - Zabbix - Docker - Chocolatey
+Puppet - r10k - hiera-eyaml - WireGuard - Zabbix - Docker - Chocolatey
